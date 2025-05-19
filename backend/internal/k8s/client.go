@@ -123,8 +123,9 @@ func (c *Client) InstallEnvoyGateway(ctx echo.Context) error {
 		})
 	}
 
-	// Install Envoy Gateway
-	installCmd := exec.Command("kubectl", "apply", "-f", "https://github.com/envoyproxy/gateway/releases/download/latest/install.yaml")
+	// Install Envoy Gateway using the official installation command
+	// Using the correct URL from the Envoy Gateway documentation
+	installCmd := exec.Command("kubectl", "apply", "-f", "https://github.com/envoyproxy/gateway/releases/latest/download/install.yaml")
 	installOutput, err := installCmd.CombinedOutput()
 	if err != nil {
 		c.log.Errorf("Failed to install Envoy Gateway: %v, output: %s", err, string(installOutput))
@@ -345,8 +346,8 @@ func (c *Client) DeploySample(ctx echo.Context) error {
 		})
 	}
 
-	// Deploy sample application
-	deployCmd := exec.Command("kubectl", "apply", "-f", "https://github.com/envoyproxy/gateway/releases/download/latest/quickstart.yaml")
+	// Deploy sample application using the official sample
+	deployCmd := exec.Command("kubectl", "apply", "-f", "https://github.com/envoyproxy/gateway/releases/latest/download/quickstart.yaml")
 	deployOutput, err := deployCmd.CombinedOutput()
 	if err != nil {
 		c.log.Errorf("Failed to deploy sample application: %v, output: %s", err, string(deployOutput))

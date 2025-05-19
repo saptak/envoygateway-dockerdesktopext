@@ -30,6 +30,7 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import PublicIcon from '@mui/icons-material/Public';
 import WarningIcon from '@mui/icons-material/Warning';
 import BuildIcon from '@mui/icons-material/Build';
+import { createDockerDesktopClient } from '@docker/extension-api-client';
 
 interface EnvoyGatewayStatus {
   installed: boolean;
@@ -37,7 +38,15 @@ interface EnvoyGatewayStatus {
   version?: string;
 }
 
+// Create Docker Desktop client
+const client = createDockerDesktopClient();
+
+function useDockerDesktopClient() {
+  return client;
+}
+
 function App() {
+  const ddClient = useDockerDesktopClient();
   const [activeTab, setActiveTab] = useState(0);
   const [loading, setLoading] = useState(true);
   const [kubernetesEnabled, setKubernetesEnabled] = useState(false);
@@ -54,26 +63,127 @@ function App() {
     checkStatus();
   }, []);
 
+  // Check if Kubernetes is running
+  const checkKubernetesStatus = async () => {
+    try {
+      const output = await ddClient.extension.host?.cli.exec("kubectl", [
+        "cluster-info",
+        "--request-timeout",
+        "2s",
+      ]);
+      
+      if (output?.stderr && output.stderr.length > 0) {
+        console.log("Kubernetes check stderr:", output.stderr);
+        return false;
+      }
+      
+      return true;
+    } catch (err) {
+      console.error("Error checking Kubernetes status:", err);
+      return false;
+    }
+  };
+
+  // Check if Envoy Gateway is installed
+  const checkEnvoyGatewayStatus = async () => {
+    try {
+      const output = await ddClient.extension.host?.cli.exec("kubectl", [
+        "get",
+        "deployment",
+        "-n",
+        "envoy-gateway-system",
+        "envoy-gateway",
+        "--ignore-not-found",
+      ]);
+
+      const isInstalled = output?.stdout && output.stdout.includes("envoy-gateway");
+      
+      if (!isInstalled) {
+        return {
+          installed: false,
+          status: "Not Installed",
+          version: "",
+        };
+      }
+
+      // Get Envoy Gateway version
+      const versionOutput = await ddClient.extension.host?.cli.exec("kubectl", [
+        "get",
+        "deployment",
+        "-n",
+        "envoy-gateway-system",
+        "envoy-gateway",
+        "-o",
+        "jsonpath={.spec.template.spec.containers[0].image}",
+      ]);
+
+      let version = "";
+      if (versionOutput?.stdout) {
+        const parts = versionOutput.stdout.split(":");
+        if (parts.length > 1) {
+          version = parts[1].trim();
+        }
+      }
+
+      // Check status
+      const statusOutput = await ddClient.extension.host?.cli.exec("kubectl", [
+        "get",
+        "deployment",
+        "-n",
+        "envoy-gateway-system",
+        "envoy-gateway",
+        "-o",
+        "jsonpath={.status.conditions[?(@.type==\"Available\")].status}",
+      ]);
+
+      let status = "Unknown";
+      if (statusOutput?.stdout) {
+        status = statusOutput.stdout.trim() === "True" ? "Running" : "Error";
+      }
+
+      return {
+        installed: true,
+        status,
+        version,
+      };
+    } catch (err) {
+      console.error("Error checking Envoy Gateway status:", err);
+      return {
+        installed: false,
+        status: "Error checking",
+        version: "",
+      };
+    }
+  };
+
   const checkStatus = async () => {
     setLoading(true);
+    setError(null);
+    
     try {
-      // In a real implementation, this would make API calls to the backend
-      // For now, we'll simulate a successful connection to Kubernetes
-      setTimeout(() => {
-        setKubernetesEnabled(true);
-        setKubernetesStatus('Kubernetes is running');
-        
-        // Let's assume Envoy Gateway is not installed for now
+      // Check Kubernetes status
+      const k8sEnabled = await checkKubernetesStatus();
+      setKubernetesEnabled(k8sEnabled);
+      setKubernetesStatus(k8sEnabled ? 'Kubernetes is running' : 'Kubernetes is not running');
+      
+      if (!k8sEnabled) {
         setEnvoyGatewayStatus({
           installed: false,
-          version: '',
-          status: 'Not installed',
+          status: "Kubernetes is not running",
+          version: "",
         });
-        
         setLoading(false);
-      }, 1000);
+        return;
+      }
+      
+      // Check Envoy Gateway status
+      const egStatus = await checkEnvoyGatewayStatus();
+      setEnvoyGatewayStatus(egStatus);
+      
+      setLoading(false);
     } catch (err) {
-      setError('Failed to connect to Docker Desktop API');
+      console.error('Error checking status:', err);
+      setError(`Failed to check status: ${err instanceof Error ? err.message : String(err)}`);
       setLoading(false);
     }
   };
@@ -88,24 +198,54 @@ function App() {
     checkStatus();
   };
   
-  // Simulated install for Envoy Gateway
-  const handleInstall = () => {
+  // Real implementation for installing Envoy Gateway
+  const handleInstall = async () => {
     setInstallingEnvoyGateway(true);
-    // In a real implementation, this would make an API call to the backend
-    setTimeout(() => {
-      setEnvoyGatewayStatus({
-        installed: true,
-        version: 'v0.0.0-latest',
-        status: 'Running',
-      });
+    setError(null);
+    
+    try {
+      const output = await ddClient.extension.host?.cli.exec("kubectl", [
+        "apply",
+        "-f",
+        "https://github.com/envoyproxy/gateway/releases/latest/download/install.yaml",
+      ]);
+      
+      if (output?.stderr && output.stderr.length > 0) {
+        throw new Error(`Installation failed: ${output.stderr}`);
+      }
+      
+      // Wait a moment to give Envoy Gateway time to start
+      setTimeout(() => {
+        // Check the status again to update the UI
+        checkStatus();
+        setInstallingEnvoyGateway(false);
+      }, 2000);
+    } catch (err) {
+      console.error('Error installing Envoy Gateway:', err);
+      setError(`Failed to install Envoy Gateway: ${err instanceof Error ? err.message : String(err)}`);
       setInstallingEnvoyGateway(false);
-    }, 2000);
+    }
   };
 
   // Handle deploying a sample application
-  const handleDeploySample = () => {
-    // In a real implementation, this would make an API call to the backend
-    alert('This would deploy a sample application using Envoy Gateway');
+  const handleDeploySample = async () => {
+    try {
+      const output = await ddClient.extension.host?.cli.exec("kubectl", [
+        "apply",
+        "-f",
+        "https://github.com/envoyproxy/gateway/releases/latest/download/quickstart.yaml",
+      ]);
+      
+      if (output?.stderr && output.stderr.length > 0) {
+        throw new Error(`Deployment failed: ${output.stderr}`);
+      }
+      
+      // Show success message
+      await ddClient.desktopUI.toast.success('Sample application deployed successfully');
+    } catch (err) {
+      console.error('Error deploying sample:', err);
+      await ddClient.desktopUI.toast.error(`Failed to deploy sample application: ${err instanceof Error ? err.message : String(err)}`);
+    }
   };
 
   // Render the Dashboard tab
