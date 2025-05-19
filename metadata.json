@@ -1,0 +1,31 @@
+{
+  "icon": "docker.svg",
+  "ui": {
+    "dashboard-tab": {
+      "title": "Envoy Gateway",
+      "root": "/ui",
+      "src": "index.html"
+    }
+  },
+  "host": {
+    "binaries": [
+      {
+        "darwin": [
+          {
+            "path": "/usr/local/bin/envoygateway-extension"
+          }
+        ],
+        "linux": [
+          {
+            "path": "/usr/local/bin/envoygateway-extension"
+          }
+        ],
+        "windows": [
+          {
+            "path": "/usr/local/bin/envoygateway-extension.exe"
+          }
+        ]
+      }
+    ]
+  }
+}
